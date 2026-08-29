@@ -57,9 +57,9 @@ balance write.
 
 | Phone | Name | Password | PIN |
 |---|---|---|---|
-| `01711111111` | Alice Rahman | `alice-demo-pass` | `8317` |
-| `01722222222` | Bob Karim | `bob-demo-pass` | `4629` |
-| `01733333333` | Chowdhury Nabil | `nabil-demo-pass` | `5182` |
+| `01711111111` | Mahafuz Rahman | `mahafuz-demo-pass` | `8317` |
+| `01722222222` | Abdul Karim | `abdul-demo-pass` | `4629` |
+| `01733333333` | Chowdhury Labib | `labib-demo-pass` | `5182` |
 
 The password opens a session; the PIN authorises each individual transfer.
 
