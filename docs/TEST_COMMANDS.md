@@ -23,7 +23,7 @@ truncated database with the system mint restored.
 pytest
 ```
 
-Expected: **30 passed** in about 45 seconds.
+Expected: **44 passed** in about 70 seconds.
 
 ## The one to run in front of the judges
 
@@ -65,6 +65,7 @@ pytest tests/test_transfer.py::test_same_key_replays_instead_of_resending -v -s
 | `test_concurrency.py` | 3 | Lost update, deadlock, concurrent idempotent retries |
 | `test_transfer.py` | 12 | Two signed entries, statement, keyset pagination, idempotency (replay, conflict, per-user scoping), overdraft, PIN, self-transfer, unknown recipient, amount validation, decimal precision |
 | `test_security.py` | 11 | IDOR, cross-account reads, missing tokens, `alg:none` forgery, wrong signing key, login enumeration, lookup leakage, SQL injection, credential storage, ledger immutability |
+| `test_requests.py` | 14 | Request → approve flow, settlement typed as `REQUEST_SETTLEMENT`, requester cannot self-approve, payer PIN required, strangers get 404, each side gets only its own verb, double payment, 8 simultaneous approvals, expiry, failed settlement leaves the request pending |
 | `test_invariants.py` | 4 | Fresh database, signup grant provenance, 500 randomised operations, service helpers vs. raw SQL |
 
 ## Runtime invariant check

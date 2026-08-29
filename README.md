@@ -6,9 +6,9 @@ A closed money ecosystem with simulated funds. Money moves only through an
 append-only double-entry ledger; every transfer is idempotent, every balance is
 reconcilable against the ledger, and no user wallet can go negative.
 
-> Build status: **Blocks 1–4 of 7 complete** — schema, auth, the transfer path,
-> and a 30-test suite running against real PostgreSQL. Money requests, rate
-> limiting and the frontend remain.
+> Build status: **Blocks 1–5 of 7 complete** — schema, auth, the transfer path,
+> money requests, and a 44-test suite running against real PostgreSQL. Rate
+> limiting, the reconcile endpoint and the frontend remain.
 
 ---
 
@@ -232,11 +232,42 @@ GET  /api/transfers/{ref}    only if you were a party to it
 GET  /api/wallet/statement   keyset-paginated, signed amounts, running balance
 ```
 
-## 9. Testing
+## 9. Money requests
+
+> *"My friend owes me ৳1,200. I want to collect it through the application."*
+
+```
+POST /api/requests                    ask someone to pay you
+GET  /api/requests?box=incoming       what is waiting on you
+POST /api/requests/{id}/approve       payer only, PIN required
+POST /api/requests/{id}/decline       payer only
+POST /api/requests/{id}/cancel        requester only
+```
+
+**A request is an invitation, never an authorization.** It moves no money and
+grants no access to the payer's wallet. Only the payer can settle it, and only
+by re-entering their PIN. The requester holding the id changes nothing — trying
+to approve your own request returns 404, and there is a test for it.
+
+Approval reuses `execute_transfer` unchanged, so a settled request gets exactly
+the same guarantees as a direct send: ordered locks, lock-then-read, the
+overdraft constraint, two immutable ledger entries.
+
+**Three defences against paying twice:**
+
+1. The request row is locked `FOR UPDATE` for the whole approval, so a second attempt waits and then finds the status is no longer `PENDING`.
+2. The settlement carries the deterministic idempotency key `request:<id>`, so even if the lock were bypassed the partial unique index returns the first transaction instead of moving money again.
+3. The transfer and the status change are **one** database transaction (`execute_transfer(..., commit=False)` inside a SAVEPOINT), so there is no window where the money has moved but the request still looks payable — and a failed settlement leaves the request payable later rather than consuming it.
+
+Expiry is computed on read rather than swept by a job: there is no scheduler in
+this system, and a request that looked pending but could not be paid would be a
+lie to the user.
+
+## 10. Testing
 
 ```bash
 psql -U postgres -c "CREATE DATABASE money_test;"
-pytest                                 # 30 passed, ~45s
+pytest                                 # 44 passed, ~70s
 pytest tests/test_concurrency.py -v    # the one to run for judges
 ```
 
@@ -250,6 +281,7 @@ have `test` in the name.
 | `test_concurrency.py` | 3 | Lost update, deadlock, concurrent idempotent retries |
 | `test_transfer.py` | 12 | Entries, statement, pagination, idempotency, refusals, decimal precision |
 | `test_security.py` | 11 | IDOR, cross-account reads, `alg:none`, enumeration, injection, ledger immutability |
+| `test_requests.py` | 14 | Flow, ledger typing, self-approval, wrong PIN, strangers, wrong verb, double payment, 8 simultaneous approvals, expiry, failed settlement |
 | `test_invariants.py` | 4 | The four invariants, including after 500 randomised operations |
 
 **The suite paid for itself.** `test_no_double_spend_under_concurrency` caught a

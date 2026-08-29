@@ -78,11 +78,18 @@ def execute_transfer(
     txn_type: TxnType = TxnType.TRANSFER,
     ip: str | None = None,
     user_agent: str | None = None,
+    commit: bool = True,
 ) -> tuple[Transaction, bool]:
     """Move money. Returns (transaction, was_idempotent_replay).
 
     The PIN check happens in `send_money` (or in the request-approval flow),
     not here, so that both entry points share one money path.
+
+    `commit=False` lets a caller fold this into a larger atomic unit — the
+    money-request approval does exactly that, so the transfer and the status
+    change on the request commit together or not at all. The write section runs
+    inside a SAVEPOINT so a constraint violation can be handled without
+    destroying the caller's surrounding transaction.
     """
     if sender.wallet is None or recipient.wallet is None:
         raise WalletMissing()
@@ -98,43 +105,46 @@ def execute_transfer(
     src_id, dst_id = sender.wallet.id, recipient.wallet.id
 
     try:
-        # --- 3. deterministic lock order ---------------------------------
-        # Sorting inside lock_wallets is what makes A->B and B->A safe to run
-        # at the same instant: every transaction in the system acquires locks
-        # in the same global order, so a wait cycle cannot form.
-        wallets = ledger_service.lock_wallets(db, src_id, dst_id)
-        src, dst = wallets[src_id], wallets[dst_id]
+        # A SAVEPOINT, so a constraint violation below can be handled without
+        # tearing down a transaction the caller may still be building.
+        with db.begin_nested():
+            # --- 3. deterministic lock order -----------------------------
+            # Sorting inside lock_wallets is what makes A->B and B->A safe to
+            # run at the same instant: every transaction in the system
+            # acquires locks in the same global order, so a wait cycle cannot
+            # form.
+            wallets = ledger_service.lock_wallets(db, src_id, dst_id)
+            src, dst = wallets[src_id], wallets[dst_id]
 
-        # --- 4 & 5. read under the lock, then write it all atomically -----
-        # post_double_entry re-checks the balance against the LOCKED row and
-        # raises InsufficientFunds before writing anything.
-        txn = ledger_service.post_double_entry(
-            db,
-            txn_type=txn_type,
-            amount=amount,
-            debit_wallet=src,
-            credit_wallet=dst,
-            initiated_by=sender.id,
-            note=note,
-            idempotency_key=idempotency_key,
-        )
+            # --- 4 & 5. read under the lock, then write it all atomically --
+            # post_double_entry re-checks the balance against the LOCKED row
+            # and raises InsufficientFunds before writing anything.
+            txn = ledger_service.post_double_entry(
+                db,
+                txn_type=txn_type,
+                amount=amount,
+                debit_wallet=src,
+                credit_wallet=dst,
+                initiated_by=sender.id,
+                note=note,
+                idempotency_key=idempotency_key,
+            )
 
-        audit(
-            db,
-            AuditAction.TRANSFER_COMPLETED,
-            actor=sender.id,
-            entity_type="transaction",
-            entity_id=txn.id,
-            ip=ip,
-            user_agent=user_agent,
-            amount=str(amount),
-            reference=txn.reference,
-            to=recipient.phone,
-        )
-        db.commit()
+            audit(
+                db,
+                AuditAction.TRANSFER_COMPLETED,
+                actor=sender.id,
+                entity_type="transaction",
+                entity_id=txn.id,
+                ip=ip,
+                user_agent=user_agent,
+                amount=str(amount),
+                reference=txn.reference,
+                to=recipient.phone,
+            )
 
     except InsufficientFunds:
-        db.rollback()
+        # The savepoint rolled back; nothing was written. Record the refusal.
         audit(
             db,
             AuditAction.TRANSFER_REJECTED,
@@ -144,11 +154,11 @@ def execute_transfer(
             amount=str(amount),
             reason="insufficient_funds",
         )
-        db.commit()
+        if commit:
+            db.commit()
         raise
 
     except IntegrityError as exc:
-        db.rollback()
         detail = str(exc.orig)
 
         # A concurrent duplicate lost the race on the partial unique index.
@@ -166,7 +176,9 @@ def execute_transfer(
 
         raise
 
-    db.refresh(txn)
+    if commit:
+        db.commit()
+        db.refresh(txn)
     return txn, False
 
 

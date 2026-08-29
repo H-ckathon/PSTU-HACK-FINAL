@@ -160,6 +160,45 @@ class TransactionNotFound(DomainError):
         super().__init__(f"No transaction {reference} on this account.")
 
 
+# --- money requests -------------------------------------------------------
+
+
+class RequestNotFound(DomainError):
+    status_code = 404
+    code = "request_not_found"
+
+    def __init__(self) -> None:
+        # Identical whether the id is unknown or belongs to someone else's
+        # conversation, so request ids cannot be probed.
+        super().__init__("No such money request on this account.")
+
+
+class RequestNotPending(DomainError):
+    status_code = 409
+    code = "request_not_pending"
+
+    def __init__(self, status: str) -> None:
+        super().__init__(
+            f"This request was already {status.lower()}.", current_status=status
+        )
+
+
+class RequestExpired(DomainError):
+    status_code = 410
+    code = "request_expired"
+
+    def __init__(self) -> None:
+        super().__init__("This request has expired. Ask for a new one.")
+
+
+class SelfRequestNotAllowed(DomainError):
+    status_code = 422
+    code = "self_request_not_allowed"
+
+    def __init__(self) -> None:
+        super().__init__("You cannot request money from yourself.")
+
+
 class WalletMissing(DomainError):
     status_code = 500
     code = "wallet_missing"
