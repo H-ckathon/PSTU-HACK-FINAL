@@ -1,6 +1,12 @@
-"""Authentication and profile endpoints."""
+"""Authentication and profile endpoints.
 
-from __future__ import annotations
+NOTE: no `from __future__ import annotations` in the routers that carry
+`@limiter.limit`. That import turns annotations into strings, and slowapi's
+wrapper reports its OWN module globals, so FastAPI cannot resolve
+`TransferRequest` or `LoginRequest` and silently demotes the request body to a
+query parameter. Every write endpoint then 422s with
+`{"loc": ["query", "body"]}`. Keep annotations real in these files.
+"""
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
 from sqlalchemy import select
@@ -8,6 +14,13 @@ from sqlalchemy.orm import Session as DbSession
 
 from app.core.deps import Principal, client_ip, get_current_principal, get_current_user
 from app.core.errors import RecipientNotFound
+from app.core.limiter import (
+    LOGIN_LIMIT,
+    LOOKUP_LIMIT,
+    REFRESH_LIMIT,
+    REGISTER_LIMIT,
+    limiter,
+)
 from app.database import get_db
 from app.models import User
 from app.schemas.auth import (
@@ -34,9 +47,11 @@ def _ua(request: Request) -> str | None:
     status_code=status.HTTP_201_CREATED,
     summary="Create an account and fund it from the system mint",
 )
+@limiter.limit(REGISTER_LIMIT)
 def register(
     body: RegisterRequest,
     request: Request,
+    response: Response,
     db: DbSession = Depends(get_db),
 ) -> RegisterResponse:
     """The signup grant is a real ledger transaction, not a balance write.
@@ -66,9 +81,11 @@ def register(
 
 
 @router.post("/auth/login", response_model=TokenPair, summary="Exchange credentials for tokens")
+@limiter.limit(LOGIN_LIMIT)
 def login(
     body: LoginRequest,
     request: Request,
+    response: Response,
     db: DbSession = Depends(get_db),
 ) -> TokenPair:
     user = auth_service.authenticate(
@@ -85,9 +102,11 @@ def login(
 
 
 @router.post("/auth/refresh", response_model=TokenPair, summary="Rotate the refresh token")
+@limiter.limit(REFRESH_LIMIT)
 def refresh(
     body: RefreshRequest,
     request: Request,
+    response: Response,
     db: DbSession = Depends(get_db),
 ) -> TokenPair:
     """Rotation with reuse detection: replaying a spent token ends the session."""
@@ -123,7 +142,10 @@ def me(user: User = Depends(get_current_user)) -> MeOut:
     response_model=LookupOut,
     summary="Resolve a phone number to a name before sending",
 )
+@limiter.limit(LOOKUP_LIMIT)
 def lookup(
+    request: Request,
+    response: Response,
     phone: str = Query(pattern=r"^01[3-9]\d{8}$", examples=["01712345678"]),
     db: DbSession = Depends(get_db),
     _: User = Depends(get_current_user),

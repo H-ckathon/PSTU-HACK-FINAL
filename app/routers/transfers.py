@@ -1,13 +1,17 @@
-"""Transfer endpoints."""
+"""Transfer endpoints.
 
-from __future__ import annotations
+NOTE: no `from __future__ import annotations` here — see the comment in
+`routers/auth.py`. It breaks slowapi's decorator and turns the request body
+into a query parameter.
+"""
 
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Header, Path, Request, status
+from fastapi import APIRouter, Depends, Header, Path, Request, Response, status
 from sqlalchemy.orm import Session as DbSession
 
 from app.core.deps import client_ip, get_current_user
+from app.core.limiter import TRANSFER_LIMIT, limiter
 from app.database import get_db
 from app.models import LedgerEntry, Transaction, User, Wallet
 from app.schemas.transfer import PartyOut, TransferOut, TransferRequest
@@ -61,9 +65,11 @@ def _to_out(
     status_code=status.HTTP_201_CREATED,
     summary="Send money to another user",
 )
+@limiter.limit(TRANSFER_LIMIT)
 def create_transfer(
     body: TransferRequest,
     request: Request,
+    response: Response,
     idempotency_key: str | None = Header(
         default=None,
         alias="Idempotency-Key",

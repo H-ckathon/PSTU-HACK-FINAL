@@ -6,9 +6,8 @@ A closed money ecosystem with simulated funds. Money moves only through an
 append-only double-entry ledger; every transfer is idempotent, every balance is
 reconcilable against the ledger, and no user wallet can go negative.
 
-> Build status: **Blocks 1–5 of 7 complete** — schema, auth, the transfer path,
-> money requests, and a 44-test suite running against real PostgreSQL. Rate
-> limiting, the reconcile endpoint and the frontend remain.
+> **Complete.** Backend, frontend, 54 tests against real PostgreSQL, and the
+> supporting documents. One process, one database, one command.
 
 ---
 
@@ -42,7 +41,8 @@ python seed.py --demo
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-Then open **http://127.0.0.1:8000/docs**.
+Then open **http://127.0.0.1:8000** for the app, or
+**http://127.0.0.1:8000/docs** for the API.
 
 Before demoing, reset to a known-clean, known-funded state:
 
@@ -145,9 +145,27 @@ revokes `UPDATE` and `DELETE` on both tables.
 | Secrets | `.env` gitignored; the app refuses to boot on the placeholder `SECRET_KEY` |
 | Audit | Every auth event and money movement, in an append-only table |
 | Lockout | 5 failed logins → 15-minute block, recorded in the audit log |
+| Rate limit | slowapi: 5/min login and register, 10/min transfers and requests, 20/min lookup |
 | Enumeration | A wrong password and an unregistered number return an identical 401, and comparable response time |
 
-Rate limiting and the live reconciliation endpoint arrive in Block 6.
+### Rate limiting is keyed by account, not by IP
+
+An IP-only limit is the wrong choice here. A whole office or campus can sit
+behind one NAT address, so one busy user would throttle everyone around them.
+Authenticated requests carry a subject, so money endpoints are limited **per
+account**; only login and register fall back to IP, which is exactly where IP
+is the right key.
+
+Storage is in-process, which is correct for a single uvicorn process and adds
+no dependency. With multiple workers each would keep its own counter — the fix
+is a `storage_uri="redis://..."` on the `Limiter`, one line, no code change.
+Naming that limit is better than pretending it is not there.
+
+**Two mechanisms, failing differently on purpose.** Six wrong passwords produce
+`401, 401, 401, 401, 423, 429`: the per-account lockout engages on the fifth
+attempt and lasts fifteen minutes, and the per-key rate limit refuses the sixth
+before it ever reaches bcrypt. An attacker rotating IP addresses still cannot
+brute force a single account.
 
 ### Refresh-token families
 
@@ -204,10 +222,11 @@ app/
     auth_service.py     register, login, token rotation, logout
   routers/        thin HTTP adapters
   core/           security primitives, dependencies, domain errors
-  static/         frontend (Block 7)
+  static/         index.html — the whole frontend, one file, no build
 migrations/       alembic; 0001 is the full schema as explicit SQL
-tests/            concurrency, idempotency, invariants, IDOR (Block 4)
-seed.py           reset + invariant checker
+tests/            concurrency, transfers, requests, security, invariants, limits
+docs/             ARCHITECTURE.md · AI_PROMPTS.md · TEST_COMMANDS.md
+seed.py           reset + demo users + invariant checker
 ```
 
 ---
@@ -263,11 +282,59 @@ Expiry is computed on read rather than swept by a job: there is no scheduler in
 this system, and a request that looked pending but could not be paid would be a
 lie to the user.
 
-## 10. Testing
+## 10. Proving it, live
+
+```
+GET /api/admin/reconcile     asserts all four invariants against live data
+GET /api/me/activity         your own audit trail
+```
+
+`reconcile` is the demo trump card. Run it at any moment:
+
+```json
+{
+  "conservation": true, "balanced_events": true,
+  "no_drift": true, "solvency": true, "all_hold": true,
+  "ledger_sum": "0.00", "entry_count": 26, "offending": {}
+}
+```
+
+When something is wrong it names the rows at fault in `offending`, so a failure
+is a starting point rather than a red light. There is a test that plants a
+deliberate inconsistency — tampering with a wallet balance directly, which the
+ledger trigger cannot prevent because `wallets` is a projection — and asserts
+that reconcile catches the drift and identifies the wallet. Otherwise a green
+light would prove nothing.
+
+`/api/me/activity` is scoped to the caller. There is no endpoint returning
+anyone else's trail: an audit log readable by the wrong person is a
+surveillance feature, not a security one.
+
+## 11. The interface
+
+One HTML file, served by the same process at `/`. **No build step, no
+framework, no CDN** — nothing is fetched from anywhere, so the app renders with
+the venue wifi down. The typeface is the operating system's own UI font, which
+is why it looks native rather than like a web page imitating an app.
+
+Five screens: sign in / register, home, send, request, approve. Amounts use
+tabular figures so columns line up; money in is green, money out is red, and
+that is the only colour in the interface.
+
+Three details that are architecture, not decoration:
+
+- **The recipient's name resolves before you pay.** Typing a number calls `/api/users/lookup`, which returns a name and never a balance — so you confirm who you are paying, and enumeration still reveals nothing financial.
+- **The Send button is never disabled to prevent double submission.** One idempotency key is minted when the form opens, so a double click, a flaky network or an impatient tap returns the *original* transaction. Client-side disabling is not a guarantee; the server is. When a retry is recognised, the confirmation says so.
+- **"Verify ledger"** runs `/api/admin/reconcile` and prints all four invariants in the interface, so the correctness argument is visible to anyone using the app, not just to whoever reads the tests.
+
+Access tokens live in a JavaScript variable and are never written to
+`localStorage`, so closing the tab ends the session and no token is left on disk.
+
+## 12. Testing
 
 ```bash
 psql -U postgres -c "CREATE DATABASE money_test;"
-pytest                                 # 44 passed, ~70s
+pytest                                 # 54 passed, ~90s
 pytest tests/test_concurrency.py -v    # the one to run for judges
 ```
 
@@ -282,6 +349,7 @@ have `test` in the name.
 | `test_transfer.py` | 12 | Entries, statement, pagination, idempotency, refusals, decimal precision |
 | `test_security.py` | 11 | IDOR, cross-account reads, `alg:none`, enumeration, injection, ledger immutability |
 | `test_requests.py` | 14 | Flow, ledger typing, self-approval, wrong PIN, strangers, wrong verb, double payment, 8 simultaneous approvals, expiry, failed settlement |
+| `test_rate_limit.py` | 10 | Throttling, per-account keying, lockout vs. rate limit precedence, reconcile (including a planted inconsistency), audit scoping |
 | `test_invariants.py` | 4 | The four invariants, including after 500 randomised operations |
 
 **The suite paid for itself.** `test_no_double_spend_under_concurrency` caught a
@@ -291,3 +359,27 @@ already cached in the Session's identity map, so the balance we read was stale.
 Twenty of twenty transfers succeeded against a wallet that could fund ten. The
 fix is `populate_existing=True`; full write-up in `docs/TEST_COMMANDS.md`.
 Reading the SQL would never have found it.
+
+## 13. Demo script
+
+Roughly three minutes. Reset first: `python seed.py --reset --demo`.
+
+| # | Beat | The line |
+|---|---|---|
+| 1 | Start uvicorn, open the app and `/docs` | One process, one database, one command. |
+| 2 | Sign in as Alice; open her statement | The opening balance is a `SIGNUP_GRANT` from the system mint, not a number in a column. Every taka has an origin. |
+| 3 | Send ৳2,500 to Bob — the name resolves before paying, then the PIN | The PIN is separate from the password. A stolen session cannot move money. |
+| 4 | **Double-click Send** | One transaction. The idempotency key means the retry returns the original — and notice we never disabled the button, because the guarantee is server-side. |
+| 5 | Bob requests ৳1,200; Alice approves | A request is an invitation, never an authorization. Only the payer can settle it, with their own PIN. |
+| 6 | Try to send ৳999,999 | Refused by a database `CHECK` constraint, not by the UI. Two independent layers. |
+| 7 | `pytest tests/test_concurrency.py -v` | Twenty threads, ten succeed, ledger still sums to zero. |
+| 8 | Click **Verify ledger** | All four invariants, asserted live. |
+| 9 | Architecture: the three extraction seams | The ledger splits last, because it is the thing that must stay one ACID unit. |
+
+Steps 4, 6 and 7 are the ones worth protecting if you have to compress.
+
+## 14. Further reading
+
+- `docs/ARCHITECTURE.md` — the full design document
+- `docs/AI_PROMPTS.md` — how AI was used, what we decided ourselves, and the three bugs it produced that we caught
+- `docs/TEST_COMMANDS.md` — every test command and what each proves

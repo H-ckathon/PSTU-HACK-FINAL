@@ -1,0 +1,1043 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Money Movement</title>
+
+<!--
+  Deliberately a single file with no build step, no framework and no CDN.
+
+  No CDN matters on demo day: this page renders with the venue wifi down,
+  because nothing is fetched from anywhere. The typeface is the operating
+  system's own UI font — Segoe UI on Windows — which is why it looks native
+  rather than like a web page pretending to be an app.
+
+  Access tokens are held in a JavaScript variable and never written to
+  localStorage, so closing the tab ends the session and no token survives on
+  disk for another process to read.
+-->
+
+<style>
+:root {
+    --bg:        #f6f7f8;
+    --surface:   #ffffff;
+    --text:      #16191c;
+    --muted:     #6b7280;
+    --faint:     #9aa2a9;
+    --line:      #e3e6e8;
+    --line-firm: #cdd3d7;
+    --credit:    #0a6b4a;
+    --debit:     #a02029;
+    --focus:     #16191c;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 "Helvetica Neue", Arial, sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------- shell */
+
+.app {
+    max-width: 460px;
+    margin: 0 auto;
+    padding: 0 20px 64px;
+}
+
+.topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 56px;
+    margin-bottom: 20px;
+}
+
+.wordmark {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+.wordmark span {
+    color: var(--faint);
+    font-weight: 400;
+}
+
+/* ---------------------------------------------------------------- cards */
+
+.card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 14px;
+}
+
+.card.flush {
+    padding: 0;
+    overflow: hidden;
+}
+
+.label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--faint);
+}
+
+/* -------------------------------------------------------------- balance */
+
+.balance-card {
+    padding: 22px 20px 20px;
+}
+
+.balance {
+    font-size: 34px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    margin: 8px 0 2px;
+}
+
+.balance .unit {
+    font-size: 20px;
+    font-weight: 500;
+    color: var(--muted);
+    margin-right: 4px;
+}
+
+.holder {
+    font-size: 13px;
+    color: var(--muted);
+}
+
+/* --------------------------------------------------------------- inputs */
+
+.field {
+    margin-bottom: 14px;
+}
+
+.field label {
+    display: block;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--muted);
+    margin-bottom: 5px;
+}
+
+input, select {
+    width: 100%;
+    padding: 10px 12px;
+    font-family: inherit;
+    font-size: 15px;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--line-firm);
+    border-radius: 7px;
+    outline: none;
+}
+
+input:focus {
+    border-color: var(--focus);
+    box-shadow: 0 0 0 3px rgba(22, 25, 28, 0.08);
+}
+
+input::placeholder {
+    color: var(--faint);
+}
+
+.hint {
+    font-size: 12px;
+    color: var(--faint);
+    margin-top: 5px;
+    min-height: 16px;
+}
+
+.hint.resolved {
+    color: var(--credit);
+}
+
+/* -------------------------------------------------------------- buttons */
+
+button {
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 500;
+    border-radius: 7px;
+    border: 1px solid transparent;
+    padding: 10px 16px;
+    cursor: pointer;
+}
+
+button:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+}
+
+.btn-primary {
+    width: 100%;
+    background: var(--text);
+    color: #fff;
+}
+
+.btn-primary:hover { background: #000; }
+
+.btn-secondary {
+    background: var(--surface);
+    border-color: var(--line-firm);
+    color: var(--text);
+}
+
+.btn-secondary:hover { background: var(--bg); }
+
+.btn-quiet {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--muted);
+    font-size: 13px;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+.btn-quiet:hover { color: var(--text); }
+
+.btn-row {
+    display: flex;
+    gap: 8px;
+}
+
+.btn-row button { flex: 1; }
+
+.actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 14px;
+}
+
+/* ----------------------------------------------------------------- list */
+
+.row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 13px 20px;
+    border-bottom: 1px solid var(--line);
+}
+
+.row:last-child { border-bottom: none; }
+
+.row-main   { min-width: 0; }
+.row-title  { font-size: 14px; font-weight: 500; }
+
+.row-sub {
+    font-size: 12px;
+    color: var(--faint);
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.row-amount {
+    font-size: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+    text-align: right;
+}
+
+.row-amount .after {
+    display: block;
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--faint);
+    margin-top: 2px;
+}
+
+.credit { color: var(--credit); }
+.debit  { color: var(--debit); }
+
+.section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--line);
+}
+
+.empty {
+    padding: 18px 20px;
+    text-align: center;
+    font-size: 13px;
+    color: var(--faint);
+}
+
+.badge {
+    display: inline-block;
+    min-width: 18px;
+    padding: 1px 6px;
+    font-size: 11px;
+    font-weight: 600;
+    text-align: center;
+    color: #fff;
+    background: var(--text);
+    border-radius: 9px;
+}
+
+.pill {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    border: 1px solid var(--line-firm);
+    border-radius: 4px;
+    padding: 1px 6px;
+}
+
+/* -------------------------------------------------------------- notices */
+
+.notice {
+    font-size: 13px;
+    padding: 11px 14px;
+    border-radius: 7px;
+    border: 1px solid var(--line-firm);
+    background: var(--surface);
+    margin-bottom: 14px;
+}
+
+.notice.error {
+    border-color: #e6c3c6;
+    background: #fdf6f6;
+    color: var(--debit);
+}
+
+.notice.ok {
+    border-color: #bfdcd0;
+    background: #f4faf7;
+    color: var(--credit);
+}
+
+.notice code {
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    font-size: 12px;
+}
+
+.mono {
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    font-size: 12px;
+}
+
+.reconcile-line {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    padding: 5px 0;
+    border-bottom: 1px solid var(--line);
+}
+
+.reconcile-line:last-child { border-bottom: none; }
+
+.footnote {
+    font-size: 12px;
+    color: var(--faint);
+    text-align: center;
+    margin-top: 18px;
+}
+
+[hidden] { display: none !important; }
+</style>
+</head>
+
+<body>
+<div class="app">
+
+    <!-- ============================================================ auth -->
+    <div id="view-auth">
+        <div class="topbar">
+            <div class="wordmark">Money Movement</div>
+        </div>
+
+        <div class="card">
+            <div class="label" style="margin-bottom:14px;" id="auth-heading">Sign in</div>
+
+            <div id="auth-error" class="notice error" hidden></div>
+
+            <div class="field">
+                <label for="auth-phone">Mobile number</label>
+                <input id="auth-phone" inputmode="numeric" autocomplete="username"
+                       placeholder="01712345678" maxlength="11">
+            </div>
+
+            <div class="field" id="field-name" hidden>
+                <label for="auth-name">Full name</label>
+                <input id="auth-name" autocomplete="name" placeholder="Your name">
+            </div>
+
+            <div class="field">
+                <label for="auth-password">Password</label>
+                <input id="auth-password" type="password" autocomplete="current-password"
+                       placeholder="At least 8 characters">
+            </div>
+
+            <div class="field" id="field-pin" hidden>
+                <label for="auth-pin">Transaction PIN</label>
+                <input id="auth-pin" inputmode="numeric" maxlength="4" placeholder="4 digits">
+                <div class="hint">Separate from your password. Required for every transfer.</div>
+            </div>
+
+            <button class="btn-primary" id="auth-submit">Sign in</button>
+
+            <div style="margin-top:14px; text-align:center;">
+                <button class="btn-quiet" id="auth-toggle">Create an account</button>
+            </div>
+        </div>
+
+        <div class="footnote">Closed ecosystem. Simulated funds.</div>
+    </div>
+
+    <!-- ============================================================ home -->
+    <div id="view-home" hidden>
+        <div class="topbar">
+            <div class="wordmark">Money Movement</div>
+            <button class="btn-quiet" id="logout">Sign out</button>
+        </div>
+
+        <div id="home-notice" class="notice ok" hidden></div>
+
+        <div class="card balance-card">
+            <div class="label">Available balance</div>
+            <div class="balance"><span class="unit">৳</span><span id="balance">0.00</span></div>
+            <div class="holder" id="holder"></div>
+        </div>
+
+        <div class="actions">
+            <button class="btn-secondary" id="go-send">Send money</button>
+            <button class="btn-secondary" id="go-request">Request money</button>
+        </div>
+
+        <div class="card flush">
+            <div class="section-head">
+                <div class="label">Requests for you</div>
+                <span class="badge" id="req-badge" hidden>0</span>
+            </div>
+            <div id="incoming-list"></div>
+        </div>
+
+        <div class="card flush">
+            <div class="section-head">
+                <div class="label">Recent activity</div>
+                <button class="btn-quiet" id="verify">Verify ledger</button>
+            </div>
+            <div id="statement-list"></div>
+        </div>
+
+        <div class="card" id="reconcile-card" hidden>
+            <div class="label" style="margin-bottom:10px;">Ledger reconciliation</div>
+            <div id="reconcile-body"></div>
+        </div>
+    </div>
+
+    <!-- ============================================================ send -->
+    <div id="view-send" hidden>
+        <div class="topbar">
+            <div class="wordmark">Send money</div>
+            <button class="btn-quiet" data-back>Back</button>
+        </div>
+
+        <div class="card">
+            <div id="send-error" class="notice error" hidden></div>
+
+            <div class="field">
+                <label for="send-phone">Send to</label>
+                <input id="send-phone" inputmode="numeric" maxlength="11" placeholder="01712345678">
+                <div class="hint" id="send-resolved"></div>
+            </div>
+
+            <div class="field">
+                <label for="send-amount">Amount</label>
+                <input id="send-amount" inputmode="decimal" placeholder="0.00">
+            </div>
+
+            <div class="field">
+                <label for="send-note">Note <span style="color:var(--faint)">(optional)</span></label>
+                <input id="send-note" maxlength="255" placeholder="What is this for?">
+            </div>
+
+            <div class="field">
+                <label for="send-pin">Transaction PIN</label>
+                <input id="send-pin" type="password" inputmode="numeric" maxlength="4"
+                       placeholder="4 digits">
+            </div>
+
+            <button class="btn-primary" id="send-submit">Send</button>
+            <div class="hint" style="text-align:center; margin-top:10px;">
+                Retries are safe. This attempt carries a single idempotency key.
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================================= request -->
+    <div id="view-request" hidden>
+        <div class="topbar">
+            <div class="wordmark">Request money</div>
+            <button class="btn-quiet" data-back>Back</button>
+        </div>
+
+        <div class="card">
+            <div id="req-error" class="notice error" hidden></div>
+
+            <div class="field">
+                <label for="req-phone">Request from</label>
+                <input id="req-phone" inputmode="numeric" maxlength="11" placeholder="01712345678">
+                <div class="hint" id="req-resolved"></div>
+            </div>
+
+            <div class="field">
+                <label for="req-amount">Amount</label>
+                <input id="req-amount" inputmode="decimal" placeholder="0.00">
+            </div>
+
+            <div class="field">
+                <label for="req-note">Note <span style="color:var(--faint)">(optional)</span></label>
+                <input id="req-note" maxlength="255" placeholder="What is this for?">
+            </div>
+
+            <button class="btn-primary" id="req-submit">Send request</button>
+            <div class="hint" style="text-align:center; margin-top:10px;">
+                They approve with their own PIN. This moves no money by itself.
+            </div>
+        </div>
+
+        <div class="card flush">
+            <div class="section-head">
+                <div class="label">Requests you sent</div>
+            </div>
+            <div id="outgoing-list"></div>
+        </div>
+    </div>
+
+    <!-- ========================================================= approve -->
+    <div id="view-approve" hidden>
+        <div class="topbar">
+            <div class="wordmark">Approve request</div>
+            <button class="btn-quiet" data-back>Back</button>
+        </div>
+
+        <div class="card">
+            <div id="approve-error" class="notice error" hidden></div>
+            <div class="label">You are paying</div>
+            <div class="balance" style="font-size:28px;">
+                <span class="unit">৳</span><span id="approve-amount">0.00</span>
+            </div>
+            <div class="holder" id="approve-to" style="margin-bottom:16px;"></div>
+
+            <div class="field">
+                <label for="approve-pin">Transaction PIN</label>
+                <input id="approve-pin" type="password" inputmode="numeric" maxlength="4"
+                       placeholder="4 digits">
+            </div>
+
+            <button class="btn-primary" id="approve-submit">Approve and pay</button>
+        </div>
+    </div>
+
+</div>
+
+<script>
+"use strict";
+
+/* ------------------------------------------------------------------ state
+   The access token lives here and nowhere else. Nothing is written to
+   localStorage, so closing the tab genuinely ends the session.            */
+
+let token   = null;
+let profile = null;
+let sendKey = null;      // one idempotency key per composed transfer
+let pendingApproval = null;
+
+const $ = (id) => document.getElementById(id);
+
+/* -------------------------------------------------------------------- api */
+
+async function api(path, options = {}) {
+    const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+    if (token) headers["Authorization"] = "Bearer " + token;
+
+    const res = await fetch(path, { ...options, headers });
+    if (res.status === 204) return null;
+
+    let body = null;
+    try { body = await res.json(); } catch (_) { /* empty body */ }
+
+    if (!res.ok) {
+        // The API answers every failure in one envelope: {code, message}.
+        // Validation errors from the schema layer arrive as FastAPI's own
+        // shape, so they are normalised here into the same thing.
+        const detail = body && body.detail;
+        const message =
+            (body && body.message) ||
+            (Array.isArray(detail) && detail[0] && detail[0].msg) ||
+            (typeof detail === "string" ? detail : null) ||
+            "Something went wrong. Try again.";
+        const err = new Error(message);
+        err.code = (body && body.code) || "error";
+        throw err;
+    }
+    return body;
+}
+
+/* ------------------------------------------------------------ formatting */
+
+function money(value) {
+    const n = Number(value);
+    return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function signedMoney(value) {
+    const n = Number(value);
+    // Thin space after the sign: "−৳2,500.00" reads as one smudged glyph,
+    // and a full space pushes the sign too far from the number.
+    return (n < 0 ? "−" : "+") + " ৳" + money(Math.abs(n));
+}
+
+function when(iso) {
+    const d = new Date(iso);
+    return d.toLocaleString(undefined, {
+        day: "numeric", month: "short", hour: "numeric", minute: "2-digit"
+    });
+}
+
+function labelFor(type) {
+    return {
+        SIGNUP_GRANT:       "Welcome bonus",
+        TRANSFER:           "Transfer",
+        REQUEST_SETTLEMENT: "Request settled",
+        REVERSAL:           "Reversal"
+    }[type] || type;
+}
+
+/* ----------------------------------------------------------------- views */
+
+const VIEWS = ["view-auth", "view-home", "view-send", "view-request", "view-approve"];
+
+function show(id) {
+    VIEWS.forEach((v) => { $(v).hidden = (v !== id); });
+    window.scrollTo(0, 0);
+}
+
+function notify(el, message, kind) {
+    el.textContent = message;
+    el.className = "notice " + kind;
+    el.hidden = false;
+}
+
+function clear(el) {
+    el.hidden = true;
+    el.textContent = "";
+}
+
+/* ------------------------------------------------------------------ auth */
+
+let registering = false;
+
+$("auth-toggle").addEventListener("click", () => {
+    registering = !registering;
+    $("auth-heading").textContent = registering ? "Create account" : "Sign in";
+    $("auth-submit").textContent  = registering ? "Create account" : "Sign in";
+    $("auth-toggle").textContent  = registering ? "I already have an account"
+                                                : "Create an account";
+    $("field-name").hidden = !registering;
+    $("field-pin").hidden  = !registering;
+    clear($("auth-error"));
+});
+
+$("auth-submit").addEventListener("click", async () => {
+    clear($("auth-error"));
+    const phone    = $("auth-phone").value.trim();
+    const password = $("auth-password").value;
+
+    try {
+        let tokens;
+        if (registering) {
+            const out = await api("/api/auth/register", {
+                method: "POST",
+                body: JSON.stringify({
+                    phone,
+                    full_name: $("auth-name").value.trim(),
+                    password,
+                    pin: $("auth-pin").value.trim()
+                })
+            });
+            tokens = out.tokens;
+            token  = tokens.access_token;
+            await loadHome();
+            notify($("home-notice"),
+                   "Account created. Your wallet was funded by grant " + out.grant_reference + ".",
+                   "ok");
+            return;
+        }
+
+        tokens = await api("/api/auth/login", {
+            method: "POST",
+            body: JSON.stringify({ phone, password })
+        });
+        token = tokens.access_token;
+        await loadHome();
+    } catch (err) {
+        notify($("auth-error"), err.message, "error");
+    }
+});
+
+$("logout").addEventListener("click", async () => {
+    try { await api("/api/auth/logout", { method: "POST" }); } catch (_) { /* already gone */ }
+    token = null;
+    profile = null;
+    $("auth-password").value = "";
+    show("view-auth");
+});
+
+/* ------------------------------------------------------------------ home */
+
+async function loadHome() {
+    const [me, statement, incoming] = await Promise.all([
+        api("/api/me"),
+        api("/api/wallet/statement?limit=8"),
+        api("/api/requests?box=incoming")
+    ]);
+
+    profile = me;
+    $("balance").textContent = money(me.wallet.balance);
+    $("holder").textContent  = me.user.full_name + " · " + me.user.phone;
+
+    renderStatement(statement.entries);
+    renderIncoming(incoming);
+
+    $("reconcile-card").hidden = true;
+    show("view-home");
+}
+
+function renderStatement(entries) {
+    const list = $("statement-list");
+    if (!entries.length) {
+        list.innerHTML = '<div class="empty">No activity yet.</div>';
+        return;
+    }
+    list.innerHTML = entries.map((e) => {
+        const other = e.counterparty ? e.counterparty.full_name : "System";
+        const cls   = Number(e.amount) < 0 ? "debit" : "credit";
+        const label = labelFor(e.type);
+        // Skip the note when it only repeats the label — the signup grant's
+        // note is literally "Welcome bonus", and printing it twice looks like
+        // a bug rather than detail.
+        const note  = e.note && e.note !== label ? " · " + escapeHtml(e.note) : "";
+        return `
+            <div class="row">
+                <div class="row-main">
+                    <div class="row-title">${escapeHtml(other)}</div>
+                    <div class="row-sub">${label} · ${when(e.created_at)}${note}</div>
+                </div>
+                <div class="row-amount ${cls}">
+                    ${signedMoney(e.amount)}
+                    <span class="after">৳${money(e.balance_after)}</span>
+                </div>
+            </div>`;
+    }).join("");
+}
+
+function renderIncoming(payload) {
+    const list  = $("incoming-list");
+    const badge = $("req-badge");
+    const open  = payload.requests.filter((r) => r.status === "PENDING");
+
+    badge.hidden = open.length === 0;
+    badge.textContent = open.length;
+
+    if (!open.length) {
+        list.innerHTML = '<div class="empty">Nothing waiting on you.</div>';
+        return;
+    }
+
+    list.innerHTML = open.map((r) => `
+        <div class="row">
+            <div class="row-main">
+                <div class="row-title">${escapeHtml(r.counterparty.full_name)}</div>
+                <div class="row-sub">
+                    ৳${money(r.amount)}
+                    ${r.note ? " · " + escapeHtml(r.note) : ""}
+                </div>
+            </div>
+            <div class="btn-row">
+                <button class="btn-secondary" data-decline="${r.id}">Decline</button>
+                <button class="btn-secondary" data-approve="${r.id}">Pay</button>
+            </div>
+        </div>`).join("");
+
+    list.querySelectorAll("[data-approve]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            const r = open.find((x) => x.id === btn.dataset.approve);
+            pendingApproval = r;
+            $("approve-amount").textContent = money(r.amount);
+            $("approve-to").textContent = "to " + r.counterparty.full_name +
+                (r.note ? " · " + r.note : "");
+            $("approve-pin").value = "";
+            clear($("approve-error"));
+            show("view-approve");
+        });
+    });
+
+    list.querySelectorAll("[data-decline]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+            try {
+                await api("/api/requests/" + btn.dataset.decline + "/decline", { method: "POST" });
+                await loadHome();
+                notify($("home-notice"), "Request declined.", "ok");
+            } catch (err) {
+                await loadHome();
+                notify($("home-notice"), err.message, "error");
+            }
+        });
+    });
+}
+
+function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    })[c]);
+}
+
+/* --------------------------------------------------------------- lookup */
+
+function attachLookup(phoneInput, hintEl) {
+    let timer = null;
+    phoneInput.addEventListener("input", () => {
+        clearTimeout(timer);
+        hintEl.textContent = "";
+        hintEl.className = "hint";
+        const phone = phoneInput.value.trim();
+        if (!/^01[3-9]\d{8}$/.test(phone)) return;
+
+        // Confirm who you are paying BEFORE you pay. The endpoint returns a
+        // name and nothing else, so this never leaks a balance.
+        timer = setTimeout(async () => {
+            try {
+                const found = await api("/api/users/lookup?phone=" + encodeURIComponent(phone));
+                hintEl.textContent = found.full_name;
+                hintEl.className = "hint resolved";
+            } catch (_) {
+                hintEl.textContent = "No account found for this number.";
+                hintEl.className = "hint";
+            }
+        }, 250);
+    });
+}
+
+/* ------------------------------------------------------------------ send */
+
+$("go-send").addEventListener("click", () => {
+    clear($("send-error"));
+    ["send-phone", "send-amount", "send-note", "send-pin"].forEach((id) => { $(id).value = ""; });
+    $("send-resolved").textContent = "";
+
+    // One key per composed transfer, minted when the form opens. If the send
+    // is retried — a double click, a flaky network, an impatient tap — the
+    // server recognises the key and returns the original transaction instead
+    // of moving money twice. The guarantee is server-side, which is why this
+    // button is never disabled to "protect" against double submission.
+    sendKey = crypto.randomUUID();
+    show("view-send");
+});
+
+$("send-submit").addEventListener("click", async () => {
+    clear($("send-error"));
+    try {
+        const out = await api("/api/transfers", {
+            method: "POST",
+            headers: { "Idempotency-Key": sendKey },
+            body: JSON.stringify({
+                recipient_phone: $("send-phone").value.trim(),
+                amount: $("send-amount").value.trim(),
+                pin: $("send-pin").value.trim(),
+                note: $("send-note").value.trim() || null
+            })
+        });
+
+        await loadHome();
+        const suffix = out.idempotent_replay
+            ? " This retry returned the original transaction — the money moved once."
+            : "";
+        notify($("home-notice"),
+               "Sent ৳" + money(out.amount) + " to " + out.recipient.full_name +
+               ". Reference " + out.reference + "." + suffix,
+               "ok");
+    } catch (err) {
+        notify($("send-error"), err.message, "error");
+    }
+});
+
+/* --------------------------------------------------------------- request */
+
+$("go-request").addEventListener("click", async () => {
+    clear($("req-error"));
+    ["req-phone", "req-amount", "req-note"].forEach((id) => { $(id).value = ""; });
+    $("req-resolved").textContent = "";
+    await renderOutgoing();
+    show("view-request");
+});
+
+async function renderOutgoing() {
+    const list = $("outgoing-list");
+    try {
+        const payload = await api("/api/requests?box=outgoing");
+        if (!payload.requests.length) {
+            list.innerHTML = '<div class="empty">You have not asked anyone yet.</div>';
+            return;
+        }
+        list.innerHTML = payload.requests.map((r) => `
+            <div class="row">
+                <div class="row-main">
+                    <div class="row-title">${escapeHtml(r.counterparty.full_name)}</div>
+                    <div class="row-sub">
+                        ৳${money(r.amount)} · ${when(r.created_at)}
+                        ${r.note ? " · " + escapeHtml(r.note) : ""}
+                    </div>
+                </div>
+                <div style="text-align:right;">
+                    <span class="pill">${r.status}</span>
+                    ${r.status === "PENDING"
+                        ? `<div style="margin-top:6px;">
+                               <button class="btn-quiet" data-cancel="${r.id}">Withdraw</button>
+                           </div>`
+                        : ""}
+                </div>
+            </div>`).join("");
+
+        list.querySelectorAll("[data-cancel]").forEach((btn) => {
+            btn.addEventListener("click", async () => {
+                try {
+                    await api("/api/requests/" + btn.dataset.cancel + "/cancel", { method: "POST" });
+                    await renderOutgoing();
+                } catch (err) {
+                    notify($("req-error"), err.message, "error");
+                }
+            });
+        });
+    } catch (err) {
+        list.innerHTML = '<div class="empty">Could not load requests.</div>';
+    }
+}
+
+$("req-submit").addEventListener("click", async () => {
+    clear($("req-error"));
+    try {
+        const out = await api("/api/requests", {
+            method: "POST",
+            body: JSON.stringify({
+                payer_phone: $("req-phone").value.trim(),
+                amount: $("req-amount").value.trim(),
+                note: $("req-note").value.trim() || null
+            })
+        });
+        ["req-phone", "req-amount", "req-note"].forEach((id) => { $(id).value = ""; });
+        $("req-resolved").textContent = "";
+        await renderOutgoing();
+        notify($("req-error"),
+               "Asked " + out.counterparty.full_name + " for ৳" + money(out.amount) + ".",
+               "ok");
+    } catch (err) {
+        notify($("req-error"), err.message, "error");
+    }
+});
+
+/* --------------------------------------------------------------- approve */
+
+$("approve-submit").addEventListener("click", async () => {
+    clear($("approve-error"));
+    try {
+        const out = await api("/api/requests/" + pendingApproval.id + "/approve", {
+            method: "POST",
+            body: JSON.stringify({ pin: $("approve-pin").value.trim() })
+        });
+        await loadHome();
+        notify($("home-notice"),
+               "Paid ৳" + money(out.amount) + " to " + out.counterparty.full_name +
+               ". Reference " + out.transaction_reference + ".",
+               "ok");
+    } catch (err) {
+        notify($("approve-error"), err.message, "error");
+    }
+});
+
+/* ------------------------------------------------------------- reconcile */
+
+$("verify").addEventListener("click", async () => {
+    const card = $("reconcile-card");
+    const body = $("reconcile-body");
+    try {
+        const r = await api("/api/admin/reconcile");
+        const lines = [
+            ["Conservation", "Σ all entries = 0", r.conservation],
+            ["Balanced events", "Σ per transaction = 0", r.balanced_events],
+            ["No drift", "balance = Σ entries", r.no_drift],
+            ["Solvency", "no negative wallet", r.solvency]
+        ];
+        body.innerHTML = lines.map(([name, detail, ok]) => `
+            <div class="reconcile-line">
+                <span>${name} <span style="color:var(--faint)">· ${detail}</span></span>
+                <span class="${ok ? "credit" : "debit"}">${ok ? "holds" : "BROKEN"}</span>
+            </div>`).join("") + `
+            <div class="hint" style="margin-top:10px;">
+                Ledger sum ৳${money(r.ledger_sum)} across ${r.entry_count} entries
+                in ${r.transaction_count} transactions.
+            </div>`;
+        card.hidden = false;
+    } catch (err) {
+        notify($("home-notice"), err.message, "error");
+    }
+});
+
+/* ---------------------------------------------------------------- wiring */
+
+document.querySelectorAll("[data-back]").forEach((b) => {
+    b.addEventListener("click", () => {
+        clear($("home-notice"));
+        loadHome();
+    });
+});
+
+attachLookup($("send-phone"), $("send-resolved"));
+attachLookup($("req-phone"), $("req-resolved"));
+
+document.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    const visible = VIEWS.find((v) => !$(v).hidden);
+    const submit = {
+        "view-auth":    "auth-submit",
+        "view-send":    "send-submit",
+        "view-request": "req-submit",
+        "view-approve": "approve-submit"
+    }[visible];
+    if (submit) $(submit).click();
+});
+
+show("view-auth");
+</script>
+</body>
+</html>

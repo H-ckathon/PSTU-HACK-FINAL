@@ -36,11 +36,37 @@ from alembic.config import Config as AlembicConfig  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import text  # noqa: E402
 
+from app.core.limiter import limiter, reset_limits  # noqa: E402
 from app.database import SessionLocal, engine  # noqa: E402
 from app.main import app  # noqa: E402
 from app.services import auth_service  # noqa: E402
 
 PASSWORD = "test-password-123"
+
+
+@pytest.fixture(autouse=True)
+def limits_off():
+    """Rate limiting is off by default in tests, and cleared between them.
+
+    Otherwise a suite that logs in dozens of times would trip the login limit
+    and every failure would be a false alarm. `tests/test_rate_limit.py` turns
+    it back on for the tests whose subject it actually is.
+    """
+    limiter.enabled = False
+    reset_limits()
+    yield
+    limiter.enabled = False
+    reset_limits()
+
+
+@pytest.fixture
+def limits_on():
+    """Opt back in, for the rate-limit tests."""
+    reset_limits()
+    limiter.enabled = True
+    yield
+    limiter.enabled = False
+    reset_limits()
 
 
 @pytest.fixture(scope="session", autouse=True)

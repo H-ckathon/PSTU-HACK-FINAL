@@ -1,13 +1,17 @@
-"""Money request endpoints — the collect-money flow."""
+"""Money request endpoints — the collect-money flow.
 
-from __future__ import annotations
+NOTE: no `from __future__ import annotations` here — see the comment in
+`routers/auth.py`. It breaks slowapi's decorator and turns the request body
+into a query parameter.
+"""
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Path, Query, Request, status
+from fastapi import APIRouter, Depends, Path, Query, Request, Response, status
 from sqlalchemy.orm import Session as DbSession
 
 from app.core.deps import client_ip, get_current_user
+from app.core.limiter import REQUEST_LIMIT, limiter
 from app.database import get_db
 from app.models import MoneyRequest, User
 from app.schemas.money_request import (
@@ -45,9 +49,11 @@ def _to_out(req: MoneyRequest, viewer: User) -> MoneyRequestOut:
     status_code=status.HTTP_201_CREATED,
     summary="Ask another user to pay you",
 )
+@limiter.limit(REQUEST_LIMIT)
 def create_request(
     body: MoneyRequestCreate,
     request: Request,
+    response: Response,
     db: DbSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> MoneyRequestOut:
@@ -92,9 +98,11 @@ def list_requests(
     response_model=MoneyRequestOut,
     summary="Pay a request",
 )
+@limiter.limit(REQUEST_LIMIT)
 def approve_request(
     body: RespondToRequest,
     request: Request,
+    response: Response,
     request_id: UUID = Path(description="From GET /api/requests"),
     db: DbSession = Depends(get_db),
     user: User = Depends(get_current_user),

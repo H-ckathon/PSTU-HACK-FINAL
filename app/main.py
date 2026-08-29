@@ -1,7 +1,7 @@
 """FastAPI application.
 
 Blocks complete: 1 (foundation), 2 (auth), 3 (transfers), 4 (tests),
-5 (money requests). The admin router mounts at the marked point.
+5 (money requests), 6 (rate limiting, reconciliation). Frontend is Block 7.
 """
 
 from contextlib import asynccontextmanager
@@ -14,8 +14,12 @@ from sqlalchemy import text
 
 from app.config import settings
 from app.constants import SYSTEM_MINT_WALLET_ID
+from slowapi.errors import RateLimitExceeded
+
 from app.core.errors import DomainError
+from app.core.limiter import limiter
 from app.database import SessionLocal, engine
+from app.routers import admin as admin_router
 from app.routers import auth as auth_router
 from app.routers import requests as requests_router
 from app.routers import transfers as transfers_router
@@ -42,7 +46,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Money Movement API",
-    version="0.5.0",
+    version="0.6.0",
     description=(
         "A closed money ecosystem with simulated funds.\n\n"
         "Money moves only through an append-only double-entry ledger. "
@@ -50,10 +54,15 @@ app = FastAPI(
         "no user wallet can go negative.\n\n"
         "**Try it:** register two users, then send money between them. The "
         "opening balance is a real `SIGNUP_GRANT` transaction debited from the "
-        "system mint, not a number written into a column."
+        "system mint, not a number written into a column.\n\n"
+        "**Then prove it:** `GET /api/admin/reconcile` asserts all four ledger "
+        "invariants against live data, at any moment you like."
     ),
     lifespan=lifespan,
 )
+
+
+app.state.limiter = limiter
 
 
 @app.exception_handler(DomainError)
@@ -66,11 +75,25 @@ async def domain_error_handler(request: Request, exc: DomainError) -> JSONRespon
     return JSONResponse(status_code=exc.status_code, content=exc.to_dict())
 
 
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    """429 in the same envelope as every other error, with a Retry-After."""
+    return JSONResponse(
+        status_code=429,
+        content={
+            "code": "rate_limited",
+            "message": "Too many requests. Wait a moment and try again.",
+            "details": {"limit": str(exc.detail)},
+        },
+        headers={"Retry-After": "60"},
+    )
+
+
 app.include_router(auth_router.router)
 app.include_router(wallet_router.router)
 app.include_router(transfers_router.router)
 app.include_router(requests_router.router)
-# app.include_router(admin.router)       # Block 6
+app.include_router(admin_router.router)
 
 
 @app.get("/health", tags=["ops"])
