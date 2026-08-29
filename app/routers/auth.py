@@ -146,7 +146,7 @@ def me(user: User = Depends(get_current_user)) -> MeOut:
 def lookup(
     request: Request,
     response: Response,
-    phone: str = Query(pattern=r"^01[3-9]\d{8}$", examples=["01712345678"]),
+    phone: str = Query(pattern=r"^01[3-9][0-9]{8}$", examples=["01712345678"]),
     db: DbSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> LookupOut:

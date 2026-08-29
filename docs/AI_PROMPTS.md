@@ -96,9 +96,9 @@ Without that test, a green light proved nothing.
 
 ## 4. Where the AI was wrong
 
-The three bugs below were all in AI-drafted code, all looked correct on review,
-and all were caught by running against a real database. This section is the part
-we would most want a judge to read.
+The bugs below were all in AI-drafted code, all looked correct on review, and
+all were caught by running against a real database. This section is the part we
+would most want a judge to read.
 
 ### 4.1 The lock was real; the balance was stale
 
@@ -157,6 +157,28 @@ prevent.
 Migration `0002` adds `sessions.family_id`; one detection now revokes the whole
 family in a single statement.
 
+### 4.4 The adversarial pass: six more
+
+Once the feature suite was green we deliberately went looking for trouble —
+`test_edge_cases.py` and `test_race_conditions.py`, 96 tests written to break
+the system rather than confirm it. They found six defects in code that had
+already passed review:
+
+| What | Why it mattered |
+|---|---|
+| Four concurrent refreshes of one token all succeeded | Read-then-write on `sessions` with no lock — **the same class of bug as 4.1**, found again in a different table. Two browser tabs would trigger it. |
+| A null byte in a note returned 500 | psycopg2 raises a bare `ValueError`; an unhandled 500 on a money endpoint. |
+| An oversized `Idempotency-Key` returned 500 | `VARCHAR(64)` reached raw. |
+| `"1e3"` was accepted and became ৳1,000 | `Decimal()` takes scientific notation, `NaN` and `Infinity`. A typo would move real money. |
+| `"٣٠٠"` was accepted and became ৳300 | `\d` is Unicode-aware in both Python's `re` **and** pydantic-core's Rust regex, so every numeric pattern in the project — amounts, phones, PINs — accepted digits a Bangladeshi keypad cannot type. |
+| Twenty spaces was a valid password | `min_length` counts whitespace. |
+
+The first is the one we would highlight. We had already found and fixed exactly
+this bug in the ledger, written it up, and explained it — and the same mistake
+was sitting untouched in the auth code, because we had only gone looking for it
+where money was involved. **Finding a bug once does not mean you have found its
+class.** That is the lesson we took from this project.
+
 ### And one integration failure worth mentioning
 
 Adding `@limiter.limit` broke 42 of 44 tests at once, with every write endpoint
@@ -185,9 +207,10 @@ Any member of the team can walk through:
 
 AI wrote most of the characters in this repository. It did not choose the ledger
 model, the invariants, the lock ordering, the idempotency mechanism, the
-deliberate omissions, or the tests that caught its own mistakes. Three times it
+deliberate omissions, or the tests that caught its own mistakes. Nine times it
 produced code that was wrong in ways that would have survived code review and
-failed in production — and the reason we found all three is that we insisted on
-running against a real database with real concurrency before believing anything.
+failed in production — and the reason we found all nine is that we insisted on
+running against a real database with real concurrency, and then went back a
+second time specifically to break what we had already proved worked.
 
 That insistence is the engineering decision we would most like to be judged on.

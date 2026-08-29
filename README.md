@@ -334,7 +334,7 @@ Access tokens live in a JavaScript variable and are never written to
 
 ```bash
 psql -U postgres -c "CREATE DATABASE money_test;"
-pytest                                 # 54 passed, ~90s
+pytest                                 # 150 passed, ~3.5 min
 pytest tests/test_concurrency.py -v    # the one to run for judges
 ```
 
@@ -349,6 +349,8 @@ have `test` in the name.
 | `test_transfer.py` | 12 | Entries, statement, pagination, idempotency, refusals, decimal precision |
 | `test_security.py` | 11 | IDOR, cross-account reads, `alg:none`, enumeration, injection, ledger immutability |
 | `test_requests.py` | 14 | Flow, ledger typing, self-approval, wrong PIN, strangers, wrong verb, double payment, 8 simultaneous approvals, expiry, failed settlement |
+| `test_race_conditions.py` | 11 | Three-way cycle, transfer vs. approval, mutual approvals, approve vs. decline, cancel vs. approve, logout mid-transfer, duplicate registration, contested refresh, 120 mixed operations |
+| `test_edge_cases.py` | 85 | Hostile amounts, control characters, oversized inputs, malformed tokens, cursor tampering, bcrypt's 72-byte boundary |
 | `test_rate_limit.py` | 10 | Throttling, per-account keying, lockout vs. rate limit precedence, reconcile (including a planted inconsistency), audit scoping |
 | `test_invariants.py` | 4 | The four invariants, including after 500 randomised operations |
 
@@ -359,6 +361,13 @@ already cached in the Session's identity map, so the balance we read was stale.
 Twenty of twenty transfers succeeded against a wallet that could fund ten. The
 fix is `populate_existing=True`; full write-up in `docs/TEST_COMMANDS.md`.
 Reading the SQL would never have found it.
+
+An adversarial pass afterwards — `test_edge_cases.py` and
+`test_race_conditions.py`, written specifically to break the system — found six
+more defects, including the same read-then-write race in the **sessions** table
+(four concurrent refreshes of one token all succeeded), two inputs that
+produced 500s on money endpoints, and `"1e3"` being silently accepted as ৳1,000.
+All six are fixed and documented in `docs/TEST_COMMANDS.md`.
 
 ## 13. Demo script
 

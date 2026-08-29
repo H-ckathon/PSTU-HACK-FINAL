@@ -9,12 +9,14 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.schemas.transfer import clean_free_text
+
 # Bangladeshi mobile format: 01[3-9] followed by 8 digits.
-PhoneStr = Annotated[str, Field(pattern=r"^01[3-9]\d{8}$", examples=["01712345678"])]
+PhoneStr = Annotated[str, Field(pattern=r"^01[3-9][0-9]{8}$", examples=["01712345678"])]
 
 # bcrypt truncates beyond 72 bytes, so we cap rather than silently shorten.
 PasswordStr = Annotated[str, Field(min_length=8, max_length=72)]
-PinStr = Annotated[str, Field(pattern=r"^\d{4}$", examples=["1234"])]
+PinStr = Annotated[str, Field(pattern=r"^[0-9]{4}$", examples=["1234"])]
 
 
 class RegisterRequest(BaseModel):
@@ -26,9 +28,20 @@ class RegisterRequest(BaseModel):
     @field_validator("full_name")
     @classmethod
     def _strip(cls, v: str) -> str:
-        v = " ".join(v.split())
-        if not v:
+        cleaned = clean_free_text(v)
+        if not cleaned:
             raise ValueError("Full name cannot be blank.")
+        return cleaned
+
+    @field_validator("password")
+    @classmethod
+    def _password_has_substance(cls, v: str) -> str:
+        # min_length alone accepts twenty spaces, which is a password only in
+        # the sense that it is hard to remember.
+        if not v.strip():
+            raise ValueError("Password cannot be only whitespace.")
+        if len(v.strip()) < 8:
+            raise ValueError("Password must be at least 8 characters.")
         return v
 
     @field_validator("pin")

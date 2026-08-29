@@ -14,7 +14,13 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.schemas.transfer import MoneyAmount, PartyOut, PhoneStr, PinStr
+from app.schemas.transfer import (
+    MoneyAmount,
+    PartyOut,
+    PhoneStr,
+    PinStr,
+    clean_free_text,
+)
 
 
 class MoneyRequestCreate(BaseModel):
@@ -27,9 +33,7 @@ class MoneyRequestCreate(BaseModel):
     @field_validator("note")
     @classmethod
     def _clean(cls, v: str | None) -> str | None:
-        if v is None:
-            return None
-        return " ".join(v.split()) or None
+        return clean_free_text(v)
 
 
 class RespondToRequest(BaseModel):

@@ -256,7 +256,27 @@ def rotate_tokens(
     it blocks the session rather than merely failing.
     """
     session_id = security.split_refresh_token(raw_refresh)
-    session = db.get(Session, session_id)
+
+    # Lock the session row for the whole rotation.
+    #
+    # Without this, rotation is a read-then-write race: several requests
+    # carrying the same refresh token all read `is_blocked = FALSE`, all pass
+    # the check, and all mint a new session — leaving four live descendants of
+    # a token that was supposed to be spent once. Two browser tabs refreshing
+    # together is enough to trigger it. `populate_existing` matters for the
+    # same reason it does in the ledger: without it SQLAlchemy would hand back
+    # the identity-map copy and we would re-read stale state under a real lock.
+    #
+    # Serialising here means the loser wakes to find `is_blocked = TRUE` and
+    # trips reuse detection. That does mean a genuine double-tab refresh ends
+    # the session — the accepted trade in token rotation, since nothing at the
+    # server can distinguish an honest race from a stolen token replayed a
+    # moment later. Production systems soften it with a short grace window;
+    # we chose the strict, safe default.
+    session = db.execute(
+        select(Session).where(Session.id == session_id).with_for_update(),
+        execution_options={"populate_existing": True},
+    ).scalar_one_or_none()
     if session is None:
         raise InvalidToken()
 
