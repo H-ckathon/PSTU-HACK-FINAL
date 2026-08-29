@@ -160,6 +160,29 @@ class TransactionNotFound(DomainError):
         super().__init__(f"No transaction {reference} on this account.")
 
 
+# --- refunds --------------------------------------------------------------
+
+
+class RefundNotAllowed(DomainError):
+    """Only the side that received the money may send it back."""
+
+    status_code = 403
+    code = "refund_not_allowed"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Only the person who received this money can return it."
+        )
+
+
+class NotRefundable(DomainError):
+    status_code = 409
+    code = "not_refundable"
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+
+
 # --- money requests -------------------------------------------------------
 
 

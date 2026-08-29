@@ -76,6 +76,7 @@ def execute_transfer(
     idempotency_key: str | None,
     note: str | None = None,
     txn_type: TxnType = TxnType.TRANSFER,
+    reverses_transaction_id: UUID | None = None,
     ip: str | None = None,
     user_agent: str | None = None,
     commit: bool = True,
@@ -128,6 +129,7 @@ def execute_transfer(
                 initiated_by=sender.id,
                 note=note,
                 idempotency_key=idempotency_key,
+                reverses_transaction_id=reverses_transaction_id,
             )
 
             audit(

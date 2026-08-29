@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app.core.errors import TransactionNotFound
 from app.models import LedgerEntry, Transaction, User, Wallet
+from app.services import refund_service
 
 MAX_PAGE = 100
 
@@ -123,6 +124,10 @@ def statement_page(
                 ),
                 "note": txn.note,
                 "created_at": entry.created_at,
+                "status": txn.status.value if hasattr(txn.status, "value") else str(txn.status),
+                # Computed here so the interface can offer Refund only where it
+                # would actually succeed, rather than showing a button that 403s.
+                "refundable": refund_service.is_refundable(txn, wallet_id),
             }
         )
 

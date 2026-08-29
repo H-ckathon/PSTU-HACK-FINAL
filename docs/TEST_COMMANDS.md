@@ -23,7 +23,7 @@ truncated database with the system mint restored.
 pytest
 ```
 
-Expected: **150 passed** in about 3.5 minutes.
+Expected: **165 passed** in about 4 minutes.
 
 Rate limiting is disabled by default in tests and cleared between them — a
 suite that logs in dozens of times would otherwise trip the login limit and
@@ -71,6 +71,7 @@ pytest tests/test_transfer.py::test_same_key_replays_instead_of_resending -v -s
 | `test_transfer.py` | 12 | Two signed entries, statement, keyset pagination, idempotency (replay, conflict, per-user scoping), overdraft, PIN, self-transfer, unknown recipient, amount validation, decimal precision |
 | `test_security.py` | 11 | IDOR, cross-account reads, missing tokens, `alg:none` forgery, wrong signing key, login enumeration, lookup leakage, SQL injection, credential storage, ledger immutability |
 | `test_requests.py` | 14 | Request → approve flow, settlement typed as `REQUEST_SETTLEMENT`, requester cannot self-approve, payer PIN required, strangers get 404, each side gets only its own verb, double payment, 8 simultaneous approvals, expiry, failed settlement leaves the request pending |
+| `test_refund.py` | 15 | Reversal writes new entries and edits nothing, both sides see the correction, sender cannot claw money back, strangers get 404, grant and reversal are not refundable, double refund refused, a failed refund leaves the original refundable, eight simultaneous refunds return the money once |
 | `test_race_conditions.py` | 11 | Three-way transfer cycle, transfer racing request approval, mutual approvals, draining from two directions, fifty threads racing one exact balance, approve vs. decline, cancel vs. approve, logout mid-transfer, simultaneous registration of one number, contested refresh rotation, 120 mixed operations |
 | `test_edge_cases.py` | 85 | Hostile amounts, control characters, oversized and malformed inputs, token shapes, cursor tampering, pagination bounds, bcrypt's 72-byte boundary, multibyte text |
 | `test_rate_limit.py` | 10 | Login throttling, 429 envelope, per-account rather than per-IP keying, lookup enumeration bounds, lockout outliving the rate-limit window, reads unthrottled, reconcile green, reconcile catching a planted inconsistency, reconcile requiring auth, audit trail scoped to the caller |

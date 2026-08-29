@@ -77,6 +77,7 @@ def post_double_entry(
     note: str | None = None,
     idempotency_key: str | None = None,
     allow_overdraft: bool = False,
+    reverses_transaction_id: UUID | None = None,
 ) -> Transaction:
     """Append one balanced business event. Does not commit.
 
@@ -101,6 +102,7 @@ def post_double_entry(
         note=note,
         idempotency_key=idempotency_key,
         initiated_by=initiated_by,
+        reverses_transaction_id=reverses_transaction_id,
     )
     db.add(txn)
     db.flush()  # assigns txn.id without ending the transaction

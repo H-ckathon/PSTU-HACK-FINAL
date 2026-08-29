@@ -275,6 +275,20 @@ button:focus-visible {
 .credit { color: var(--credit); }
 .debit  { color: var(--debit); }
 
+.row-action {
+    margin-top: 6px;
+}
+
+.row-action button {
+    font-size: 12px;
+    padding: 0;
+}
+
+.reversed {
+    text-decoration: line-through;
+    color: var(--faint);
+}
+
 .section-head {
     display: flex;
     align-items: center;
@@ -534,6 +548,39 @@ button:focus-visible {
         </div>
     </div>
 
+    <!-- ========================================================== refund -->
+    <div id="view-refund" hidden>
+        <div class="topbar">
+            <div class="wordmark">Return money</div>
+            <button class="btn-quiet" data-back>Back</button>
+        </div>
+
+        <div class="card">
+            <div id="refund-error" class="notice error" hidden></div>
+            <div class="label">You are returning</div>
+            <div class="balance" style="font-size:28px;">
+                <span class="unit">৳</span><span id="refund-amount">0.00</span>
+            </div>
+            <div class="holder" id="refund-to" style="margin-bottom:16px;"></div>
+
+            <div class="field">
+                <label for="refund-reason">Reason <span style="color:var(--faint)">(optional)</span></label>
+                <input id="refund-reason" maxlength="255" placeholder="Sent to me by mistake">
+            </div>
+
+            <div class="field">
+                <label for="refund-pin">Transaction PIN</label>
+                <input id="refund-pin" type="password" inputmode="numeric" maxlength="4"
+                       placeholder="4 digits">
+            </div>
+
+            <button class="btn-primary" id="refund-submit">Return the money</button>
+            <div class="hint" style="text-align:center; margin-top:10px;">
+                Nothing is erased. This records a correction alongside the original.
+            </div>
+        </div>
+    </div>
+
     <!-- ========================================================= approve -->
     <div id="view-approve" hidden>
         <div class="topbar">
@@ -572,6 +619,7 @@ let token   = null;
 let profile = null;
 let sendKey = null;      // one idempotency key per composed transfer
 let pendingApproval = null;
+let pendingRefund = null;
 
 const $ = (id) => document.getElementById(id);
 
@@ -636,7 +684,9 @@ function labelFor(type) {
 
 /* ----------------------------------------------------------------- views */
 
-const VIEWS = ["view-auth", "view-home", "view-send", "view-request", "view-approve"];
+const VIEWS = [
+    "view-auth", "view-home", "view-send", "view-request", "view-approve", "view-refund"
+];
 
 function show(id) {
     VIEWS.forEach((v) => { $(v).hidden = (v !== id); });
@@ -748,18 +798,46 @@ function renderStatement(entries) {
         // note is literally "Welcome bonus", and printing it twice looks like
         // a bug rather than detail.
         const note  = e.note && e.note !== label ? " · " + escapeHtml(e.note) : "";
+        const gone  = e.status === "REVERSED";
         return `
             <div class="row">
                 <div class="row-main">
                     <div class="row-title">${escapeHtml(other)}</div>
-                    <div class="row-sub">${label} · ${when(e.created_at)}${note}</div>
+                    <div class="row-sub">
+                        ${label} · ${when(e.created_at)}${note}${gone ? " · returned" : ""}
+                    </div>
+                    ${e.refundable
+                        ? `<div class="row-action">
+                               <button class="btn-quiet"
+                                       data-refund="${e.reference}"
+                                       data-amount="${e.amount}"
+                                       data-who="${escapeHtml(other)}">Return this money</button>
+                           </div>`
+                        : ""}
                 </div>
-                <div class="row-amount ${cls}">
+                <div class="row-amount ${cls} ${gone ? "reversed" : ""}">
                     ${signedMoney(e.amount)}
                     <span class="after">৳${money(e.balance_after)}</span>
                 </div>
             </div>`;
     }).join("");
+
+    list.querySelectorAll("[data-refund]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            pendingRefund = {
+                reference: btn.dataset.refund,
+                amount: Math.abs(Number(btn.dataset.amount)),
+                who: btn.dataset.who
+            };
+            $("refund-amount").textContent = money(pendingRefund.amount);
+            $("refund-to").textContent =
+                "back to " + pendingRefund.who + " · " + pendingRefund.reference;
+            $("refund-pin").value = "";
+            $("refund-reason").value = "";
+            clear($("refund-error"));
+            show("view-refund");
+        });
+    });
 }
 
 function renderIncoming(payload) {
@@ -985,6 +1063,29 @@ $("approve-submit").addEventListener("click", async () => {
     }
 });
 
+/* ---------------------------------------------------------------- refund */
+
+$("refund-submit").addEventListener("click", async () => {
+    clear($("refund-error"));
+    try {
+        const out = await api("/api/transfers/" + pendingRefund.reference + "/refund", {
+            method: "POST",
+            body: JSON.stringify({
+                pin: $("refund-pin").value.trim(),
+                reason: $("refund-reason").value.trim() || null
+            })
+        });
+        await loadHome();
+        notify($("home-notice"),
+               "Returned ৳" + money(out.amount) + " to " + out.recipient.full_name +
+               ". Reference " + out.reference + ", correcting " + out.reverses_reference +
+               " — both remain in the ledger.",
+               "ok");
+    } catch (err) {
+        notify($("refund-error"), err.message, "error");
+    }
+});
+
 /* ------------------------------------------------------------- reconcile */
 
 $("verify").addEventListener("click", async () => {
@@ -1032,7 +1133,8 @@ document.addEventListener("keydown", (e) => {
         "view-auth":    "auth-submit",
         "view-send":    "send-submit",
         "view-request": "req-submit",
-        "view-approve": "approve-submit"
+        "view-approve": "approve-submit",
+        "view-refund":  "refund-submit"
     }[visible];
     if (submit) $(submit).click();
 });

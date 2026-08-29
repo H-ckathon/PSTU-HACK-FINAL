@@ -14,8 +14,8 @@ from app.core.deps import client_ip, get_current_user
 from app.core.limiter import TRANSFER_LIMIT, limiter
 from app.database import get_db
 from app.models import LedgerEntry, Transaction, User, Wallet
-from app.schemas.transfer import PartyOut, TransferOut, TransferRequest
-from app.services import statement_service, transfer_service
+from app.schemas.transfer import PartyOut, RefundRequest, TransferOut, TransferRequest
+from app.services import refund_service, statement_service, transfer_service
 
 router = APIRouter(prefix="/api", tags=["transfers"])
 
@@ -56,6 +56,11 @@ def _to_out(
         recipient=_party(db, txn.receiver_wallet_id),
         balance_after=entry.balance_after if entry else None,
         idempotent_replay=replay,
+        reverses_reference=(
+            db.get(Transaction, txn.reverses_transaction_id).reference
+            if txn.reverses_transaction_id
+            else None
+        ),
     )
 
 
@@ -110,6 +115,44 @@ def create_transfer(
         user_agent=request.headers.get("user-agent"),
     )
     return _to_out(db, txn, sender.wallet.id, replay=replay)
+
+
+@router.post(
+    "/transfers/{reference}/refund",
+    response_model=TransferOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Return money you received",
+)
+@limiter.limit(TRANSFER_LIMIT)
+def refund_transfer(
+    body: RefundRequest,
+    request: Request,
+    response: Response,
+    reference: str = Path(min_length=4, max_length=20, examples=["TXN8H2K4M9P"]),
+    db: DbSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> TransferOut:
+    """Send back money that was sent to you.
+
+    Nothing is edited and nothing is deleted. This creates a **new**
+    `REVERSAL` transaction with its own pair of signed ledger entries, pointing
+    at the transaction it corrects — so the ledger keeps both the original and
+    the correction, and still sums to zero.
+
+    Only the recipient can refund. The original sender cannot claw money back
+    out of someone else's wallet, because that capability does not exist
+    anywhere in this system.
+    """
+    reversal, _original = refund_service.refund(
+        db,
+        actor=user,
+        reference=reference,
+        pin=body.pin,
+        reason=body.reason,
+        ip=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+    return _to_out(db, reversal, user.wallet.id)
 
 
 @router.get(

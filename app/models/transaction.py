@@ -74,6 +74,13 @@ class Transaction(Base):
 
     note: Mapped[str | None] = mapped_column(String(255))
     idempotency_key: Mapped[str | None] = mapped_column(String(64))
+
+    # Set only on a REVERSAL. A refund is a new transaction that points at the
+    # one it corrects — the original is never edited, so the history of the
+    # mistake survives alongside the fix.
+    reverses_transaction_id: Mapped[UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("transactions.id")
+    )
     initiated_by: Mapped[UUID | None] = mapped_column(PgUUID(as_uuid=True), ForeignKey("users.id"))
     failure_reason: Mapped[str | None] = mapped_column(String(100))
 

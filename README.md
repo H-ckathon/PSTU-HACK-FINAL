@@ -6,7 +6,7 @@ A closed money ecosystem with simulated funds. Money moves only through an
 append-only double-entry ledger; every transfer is idempotent, every balance is
 reconcilable against the ledger, and no user wallet can go negative.
 
-> **Complete.** Backend, frontend, 54 tests against real PostgreSQL, and the
+> **Complete.** Backend, frontend, 165 tests against real PostgreSQL, and the
 > supporting documents. One process, one database, one command.
 
 ---
@@ -108,6 +108,10 @@ correctness survives a bug in the application layer.
 | `money_requests` | Collect-money flow. A request is an invitation, never an authorization. |
 | `audit_log` | Append-only forensic trail: actor, action, IP, user agent. |
 
+`transactions.reverses_transaction_id` links a `REVERSAL` to the transaction it
+corrects, with a partial unique index so a transaction can be reversed at most
+once — a database guarantee, not an application check.
+
 ### Why the ledger, not a balance column
 
 Storing `balance` as truth and running `UPDATE ... SET balance = balance - 500`
@@ -144,6 +148,7 @@ revokes `UPDATE` and `DELETE` on both tables.
 | Injection | Parameterized queries only; no string-built SQL anywhere |
 | Secrets | `.env` gitignored; the app refuses to boot on the placeholder `SECRET_KEY` |
 | Audit | Every auth event and money movement, in an append-only table |
+| Refunds | Only the recipient can return money, and only with their PIN — a sender can never claw a payment back |
 | Lockout | 5 failed logins → 15-minute block, recorded in the audit log |
 | Rate limit | slowapi: 5/min login and register, 10/min transfers and requests, 20/min lookup |
 | Enumeration | A wrong password and an unregistered number return an identical 401, and comparable response time |
@@ -251,7 +256,47 @@ GET  /api/transfers/{ref}    only if you were a party to it
 GET  /api/wallet/statement   keyset-paginated, signed amounts, running balance
 ```
 
-## 9. Money requests
+## 9. Refunds — corrections without rewriting history
+
+```
+POST /api/transfers/{reference}/refund     recipient only, PIN required
+```
+
+Money movement is not always right the first time, so the system needs a way to
+put a mistake right. It does **not** do that by editing or deleting anything —
+it cannot, since `ledger_entries` is append-only at the database level. A refund
+creates a **new** `REVERSAL` transaction with its own pair of signed entries,
+pointing back at the transaction it corrects through
+`transactions.reverses_transaction_id`.
+
+The result is that the ledger holds both the mistake and the fix. The original
+is marked `REVERSED` and its entries still say exactly what happened, which is
+what an auditor actually wants: not a clean history, an honest one.
+
+**Only the recipient can refund.** The original sender cannot claw a payment
+back, because that would be precisely the pull-money-from-someone-else's-wallet
+capability every other decision here exists to prevent. Refunding spends the
+refunder's money, so it is authorised the way all spending is — with the PIN.
+
+Three independent reasons a transaction cannot be refunded twice:
+
+1. The original row is locked `FOR UPDATE` for the whole operation, so a second attempt waits and finds it already `REVERSED`.
+2. A partial unique index, `uq_one_reversal_per_transaction`, means the **database** permits at most one reversal per transaction.
+3. The settlement carries the deterministic key `reversal:<id>`.
+
+Verified with eight simultaneous refunds: exactly one succeeds. A signup grant
+cannot be refunded (there is nobody to return it to) and a reversal cannot
+itself be reversed (corrections would chain without bound). If the refunder has
+since spent the money the refusal is clean and the original stays refundable,
+because the reversal and the status change share one transaction.
+
+**Deliberately not built:** partial refunds, and a time window on refunds. A
+partial refund needs a per-transaction refunded-total to stay correct under
+concurrency; a time window is meaningful when there is external settlement to
+race, and this is a closed ecosystem. Both are stated rather than silently
+absent.
+
+## 10. Money requests
 
 > *"My friend owes me ৳1,200. I want to collect it through the application."*
 
@@ -282,7 +327,7 @@ Expiry is computed on read rather than swept by a job: there is no scheduler in
 this system, and a request that looked pending but could not be paid would be a
 lie to the user.
 
-## 10. Proving it, live
+## 11. Proving it, live
 
 ```
 GET /api/admin/reconcile     asserts all four invariants against live data
@@ -310,7 +355,7 @@ light would prove nothing.
 anyone else's trail: an audit log readable by the wrong person is a
 surveillance feature, not a security one.
 
-## 11. The interface
+## 12. The interface
 
 One HTML file, served by the same process at `/`. **No build step, no
 framework, no CDN** — nothing is fetched from anywhere, so the app renders with
@@ -330,11 +375,11 @@ Three details that are architecture, not decoration:
 Access tokens live in a JavaScript variable and are never written to
 `localStorage`, so closing the tab ends the session and no token is left on disk.
 
-## 12. Testing
+## 13. Testing
 
 ```bash
 psql -U postgres -c "CREATE DATABASE money_test;"
-pytest                                 # 150 passed, ~3.5 min
+pytest                                 # 165 passed, ~4 min
 pytest tests/test_concurrency.py -v    # the one to run for judges
 ```
 
@@ -349,6 +394,7 @@ have `test` in the name.
 | `test_transfer.py` | 12 | Entries, statement, pagination, idempotency, refusals, decimal precision |
 | `test_security.py` | 11 | IDOR, cross-account reads, `alg:none`, enumeration, injection, ledger immutability |
 | `test_requests.py` | 14 | Flow, ledger typing, self-approval, wrong PIN, strangers, wrong verb, double payment, 8 simultaneous approvals, expiry, failed settlement |
+| `test_refund.py` | 15 | Reversal entries, untouched originals, sender cannot claw back, double refund, spent money, eight simultaneous refunds |
 | `test_race_conditions.py` | 11 | Three-way cycle, transfer vs. approval, mutual approvals, approve vs. decline, cancel vs. approve, logout mid-transfer, duplicate registration, contested refresh, 120 mixed operations |
 | `test_edge_cases.py` | 85 | Hostile amounts, control characters, oversized inputs, malformed tokens, cursor tampering, bcrypt's 72-byte boundary |
 | `test_rate_limit.py` | 10 | Throttling, per-account keying, lockout vs. rate limit precedence, reconcile (including a planted inconsistency), audit scoping |
@@ -369,7 +415,7 @@ more defects, including the same read-then-write race in the **sessions** table
 produced 500s on money endpoints, and `"1e3"` being silently accepted as ৳1,000.
 All six are fixed and documented in `docs/TEST_COMMANDS.md`.
 
-## 13. Demo script
+## 14. Demo script
 
 Roughly three minutes. Reset first: `python seed.py --reset --demo`.
 
@@ -380,14 +426,15 @@ Roughly three minutes. Reset first: `python seed.py --reset --demo`.
 | 3 | Send ৳2,500 to Bob — the name resolves before paying, then the PIN | The PIN is separate from the password. A stolen session cannot move money. |
 | 4 | **Double-click Send** | One transaction. The idempotency key means the retry returns the original — and notice we never disabled the button, because the guarantee is server-side. |
 | 5 | Bob requests ৳1,200; Alice approves | A request is an invitation, never an authorization. Only the payer can settle it, with their own PIN. |
-| 6 | Try to send ৳999,999 | Refused by a database `CHECK` constraint, not by the UI. Two independent layers. |
-| 7 | `pytest tests/test_concurrency.py -v` | Twenty threads, ten succeed, ledger still sums to zero. |
-| 8 | Click **Verify ledger** | All four invariants, asserted live. |
-| 9 | Architecture: the three extraction seams | The ledger splits last, because it is the thing that must stay one ACID unit. |
+| 6 | Bob **returns** the ৳2,500 | Nothing is edited or deleted — the ledger keeps both the mistake and the fix, and the original shows struck through as returned. |
+| 7 | Try to send ৳999,999 | Refused by a database `CHECK` constraint, not by the UI. Two independent layers. |
+| 8 | `pytest tests/test_concurrency.py -v` | Twenty threads, ten succeed, ledger still sums to zero. |
+| 9 | Click **Verify ledger** | All four invariants, asserted live. |
+| 10 | Architecture: the three extraction seams | The ledger splits last, because it is the thing that must stay one ACID unit. |
 
-Steps 4, 6 and 7 are the ones worth protecting if you have to compress.
+Steps 4, 6, 7 and 8 are the ones worth protecting if you have to compress.
 
-## 14. Further reading
+## 15. Further reading
 
 - `docs/ARCHITECTURE.md` — the full design document
 - `docs/AI_PROMPTS.md` — how AI was used, what we decided ourselves, and the three bugs it produced that we caught

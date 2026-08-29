@@ -91,6 +91,18 @@ class TransferRequest(BaseModel):
         return clean_free_text(v)
 
 
+class RefundRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pin: PinStr = Field(description="Refunding spends your money, so it needs your PIN")
+    reason: Annotated[str | None, Field(max_length=255)] = None
+
+    @field_validator("reason")
+    @classmethod
+    def _clean_reason(cls, v: str | None) -> str | None:
+        return clean_free_text(v)
+
+
 class PartyOut(BaseModel):
     phone: str
     full_name: str
@@ -115,6 +127,9 @@ class TransferOut(BaseModel):
         default=False,
         description="True when this response replays an earlier identical request",
     )
+    reverses_reference: str | None = Field(
+        default=None, description="On a REVERSAL, the transaction it corrects"
+    )
 
 
 class StatementEntry(BaseModel):
@@ -129,6 +144,11 @@ class StatementEntry(BaseModel):
     counterparty: PartyOut | None
     note: str | None
     created_at: datetime
+    status: str = "COMPLETED"
+    refundable: bool = Field(
+        default=False,
+        description="True when you received this money and can still return it",
+    )
 
 
 class StatementPage(BaseModel):
