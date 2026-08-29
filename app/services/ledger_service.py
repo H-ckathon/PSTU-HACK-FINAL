@@ -44,7 +44,19 @@ def lock_wallets(db: Session, *wallet_ids: UUID) -> dict[UUID, Wallet]:
         select(Wallet)
         .where(Wallet.id.in_(unique_ids))
         .order_by(Wallet.id)
-        .with_for_update()
+        .with_for_update(),
+        # populate_existing is NOT optional here, and it is subtle enough to be
+        # worth spelling out. If a Wallet is already in this Session's identity
+        # map — and it is, because `user.wallet` is eagerly joined — SQLAlchemy
+        # returns the cached Python object and DISCARDS the freshly selected
+        # row. PostgreSQL would take the lock correctly and we would then read
+        # a stale balance from memory: the exact lost-update bug this function
+        # exists to prevent, hidden one layer up.
+        #
+        # `tests/test_concurrency.py::test_no_double_spend_under_concurrency`
+        # fails without this line: 20 of 20 transfers succeed against a wallet
+        # that can fund 10.
+        execution_options={"populate_existing": True},
     ).scalars().all()
 
     wallets = {w.id: w for w in rows}

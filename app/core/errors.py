@@ -131,6 +131,35 @@ class InsufficientFunds(DomainError):
         )
 
 
+class IdempotencyKeyConflict(DomainError):
+    """Same key, different request.
+
+    Returning the original transaction here would be actively dangerous: the
+    caller asked for something else. Replay is only safe when the request is
+    identical, so a mismatch is an error rather than a silent no-op.
+    """
+
+    status_code = 409
+    code = "idempotency_key_conflict"
+
+    def __init__(self, reference: str) -> None:
+        super().__init__(
+            "This idempotency key was already used for a different transfer "
+            f"({reference}). Use a new key.",
+            original_reference=reference,
+        )
+
+
+class TransactionNotFound(DomainError):
+    status_code = 404
+    code = "transaction_not_found"
+
+    def __init__(self, reference: str) -> None:
+        # Identical response whether the reference does not exist or belongs to
+        # someone else, so references cannot be probed.
+        super().__init__(f"No transaction {reference} on this account.")
+
+
 class WalletMissing(DomainError):
     status_code = 500
     code = "wallet_missing"

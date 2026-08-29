@@ -1,7 +1,7 @@
 """FastAPI application.
 
-Blocks complete: 1 (foundation), 2 (auth).
-Routers for transfers, requests and admin mount at the marked points.
+Blocks complete: 1 (foundation), 2 (auth), 3 (transfers), 4 (tests).
+Routers for requests and admin mount at the marked points.
 """
 
 from contextlib import asynccontextmanager
@@ -17,6 +17,8 @@ from app.constants import SYSTEM_MINT_WALLET_ID
 from app.core.errors import DomainError
 from app.database import SessionLocal, engine
 from app.routers import auth as auth_router
+from app.routers import transfers as transfers_router
+from app.routers import wallet as wallet_router
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -39,7 +41,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Money Movement API",
-    version="0.2.0",
+    version="0.3.0",
     description=(
         "A closed money ecosystem with simulated funds.\n\n"
         "Money moves only through an append-only double-entry ledger. "
@@ -64,7 +66,8 @@ async def domain_error_handler(request: Request, exc: DomainError) -> JSONRespon
 
 
 app.include_router(auth_router.router)
-# app.include_router(transfers.router)   # Block 3
+app.include_router(wallet_router.router)
+app.include_router(transfers_router.router)
 # app.include_router(requests.router)    # Block 5
 # app.include_router(admin.router)       # Block 6
 
